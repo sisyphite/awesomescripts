@@ -10,7 +10,25 @@ $isAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIden
 
 if (-not $isAdmin) {
     Write-Host "权限不足，正在以管理员身份重新启动脚本..."
+
     $scriptPath = $MyInvocation.MyCommand.Definition
+
+    # 通过管道（irm | iex）执行时，脚本没有落盘路径，需先写入临时文件
+    if ([string]::IsNullOrWhiteSpace($scriptPath)) {
+        $tmpFile = Join-Path $env:TEMP "update_mac_$(Get-Random).ps1"
+        try {
+            # 从远端重新下载脚本内容写入临时文件
+            $src = (Invoke-RestMethod -Uri "https://sisyphite.github.io/awesomescripts/update-macaddress.ps1" -ErrorAction Stop)
+            Set-Content -Path $tmpFile -Value $src -Encoding UTF8 -Force
+            $scriptPath = $tmpFile
+        }
+        catch {
+            Write-Host "错误：无法获取脚本内容以提权重启。请手动以管理员身份运行此脚本。"
+            Read-Host "按下 ENTER 退出..."
+            exit
+        }
+    }
+
     try {
         Start-Process -FilePath "powershell.exe" `
             -ArgumentList "-NoProfile -ExecutionPolicy Bypass -File `"$scriptPath`"" `
