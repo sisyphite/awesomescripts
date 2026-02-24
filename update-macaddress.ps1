@@ -13,8 +13,9 @@ if (-not $isAdmin) {
 
     $scriptPath = $MyInvocation.MyCommand.Definition
 
-    # 通过管道（irm | iex）执行时，脚本没有落盘路径，需先写入临时文件
-    if ([string]::IsNullOrWhiteSpace($scriptPath)) {
+    # 通过管道（irm | iex）执行时，Definition 返回的是宿主 exe 路径而非 .ps1 文件
+    # 用扩展名判断是否真的有落盘脚本
+    if ($scriptPath -notlike "*.ps1") {
         $tmpFile = Join-Path $env:TEMP "update_mac_$(Get-Random).ps1"
         try {
             # 从远端重新下载脚本内容写入临时文件
