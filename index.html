@@ -17,7 +17,7 @@
       --bg:        #0d0f13;
       --surface:   #13161c;
       --border:    #1f242e;
-      --accent:    #4fffb0;   /* ← your brand color */
+      --accent:    #4fffb0;
       --accent2:   #ff6b6b;
       --muted:     #4a5568;
       --text:      #c9d1d9;
@@ -27,9 +27,6 @@
       --sans:      'Syne', sans-serif;
     }
 
-    /* ============================================
-       RESET & BASE
-       ============================================ */
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
     body {
@@ -41,7 +38,6 @@
       min-height: 100vh;
     }
 
-    /* noise grain overlay */
     body::before {
       content: '';
       position: fixed; inset: 0;
@@ -50,9 +46,6 @@
       z-index: 0;
     }
 
-    /* ============================================
-       LAYOUT
-       ============================================ */
     .wrapper {
       position: relative;
       z-index: 1;
@@ -64,9 +57,7 @@
     /* ============================================
        HEADER
        ============================================ */
-    header {
-      margin-bottom: 64px;
-    }
+    header { margin-bottom: 64px; }
 
     .header-badge {
       font-size: 11px;
@@ -220,7 +211,7 @@
       display: flex;
       gap: 6px;
       flex-wrap: wrap;
-      padding: 0 20px 14px;
+      padding: 0 20px 16px;
     }
     .chip {
       font-size: 10px;
@@ -233,17 +224,28 @@
       border: 1px solid rgba(79,255,176,.15);
     }
 
-    /* Usage Example Block */
+    /* ============================================
+       CODE SECTION — redesigned
+       ============================================ */
     .code-section {
       border-top: 1px solid var(--border);
     }
 
+    /* Tab bar: label on left, copy button on right — same row */
     .code-tabs {
       display: flex;
+      align-items: center;
+      justify-content: space-between;
       border-bottom: 1px solid var(--border);
+      padding: 0 4px 0 0;
     }
+
+    .code-tabs-left {
+      display: flex;
+    }
+
     .code-tab {
-      padding: 8px 16px;
+      padding: 9px 16px;
       font-size: 11px;
       text-transform: uppercase;
       letter-spacing: .08em;
@@ -251,47 +253,51 @@
       cursor: pointer;
       border-right: 1px solid var(--border);
       transition: all .15s;
+      user-select: none;
     }
+    .code-tab:hover { color: var(--text); }
     .code-tab.active {
       color: var(--accent);
       background: rgba(79,255,176,.04);
     }
 
-    .code-block {
-      display: none;
-      position: relative;
-    }
-    .code-block.active { display: block; }
-
-    pre {
-      padding: 16px 20px;
-      overflow-x: auto;
-      font-size: 12px;
-      line-height: 1.7;
-      color: #a8c0d6;
-    }
-
-    /* syntax highlight hints (basic) */
-    .kw  { color: #ff79c6; }
-    .str { color: #f1fa8c; }
-    .cm  { color: #6272a4; font-style: italic; }
-    .fn  { color: var(--accent); }
-    .arg { color: #ffb86c; }
-
+    /* Copy button lives in the tab bar, right side */
     .copy-btn {
-      position: absolute;
-      top: 10px; right: 12px;
-      background: var(--border);
-      border: none;
+      background: transparent;
+      border: 1px solid var(--border);
       border-radius: 4px;
-      padding: 4px 10px;
+      padding: 4px 12px;
       font-family: var(--mono);
       font-size: 10px;
       color: var(--muted);
       cursor: pointer;
       transition: all .15s;
+      white-space: nowrap;
+      flex-shrink: 0;
     }
-    .copy-btn:hover { background: var(--accent); color: #000; }
+    .copy-btn:hover {
+      background: var(--accent);
+      border-color: var(--accent);
+      color: #000;
+    }
+    .copy-btn.copied {
+      background: rgba(79,255,176,.15);
+      border-color: var(--accent);
+      color: var(--accent);
+    }
+
+    .code-block {
+      display: none;
+    }
+    .code-block.active { display: block; }
+
+    pre {
+      padding: 20px 24px;
+      overflow-x: auto;
+      font-size: 12.5px;
+      line-height: 1.8;
+      color: #a8c0d6;
+    }
 
     /* Options / Params table */
     .params-table {
@@ -329,16 +335,11 @@
     footer a { color: var(--muted); text-decoration: none; }
     footer a:hover { color: var(--accent); }
 
-    /* ============================================
-       HIGHLIGHT.JS OVERRIDES
-       ============================================ */
-    /* strip hljs default background so it inherits the card's dark surface */
+    /* highlight.js overrides */
     .hljs { background: transparent !important; padding: 0 !important; }
     pre code.hljs { display: block; }
 
-    /* ============================================
-       EMPTY STATE
-       ============================================ */
+    /* Empty state */
     .empty {
       grid-column: 1/-1;
       text-align: center;
@@ -347,16 +348,12 @@
     }
     .empty-icon { font-size: 40px; margin-bottom: 12px; }
 
-    /* ============================================
-       ANIMATIONS
-       ============================================ */
+    /* Animations */
     .card { animation: fadeUp .3s ease both; }
     @keyframes fadeUp {
       from { opacity: 0; transform: translateY(12px); }
       to   { opacity: 1; transform: translateY(0); }
     }
-
-    /* staggered delay */
     .card:nth-child(1) { animation-delay: .05s; }
     .card:nth-child(2) { animation-delay: .10s; }
     .card:nth-child(3) { animation-delay: .15s; }
@@ -368,93 +365,67 @@
 <body>
 <div class="wrapper">
 
-  <!-- ===================== HEADER ===================== -->
   <header>
     <div class="header-badge">personal script library</div>
     <h1>Awesome<span>Scripts</span></h1>
-    <!-- ✏️ 改成你自己的描述 -->
     <p class="tagline">一些自用的脚本。</p>
   </header>
 
-  <!-- ===================== TOOLBAR ===================== -->
   <div class="toolbar">
     <input class="search-box" type="text" id="search" placeholder="$ search scripts..." />
-    <div class="tag-filter" id="tagFilter">
-      <!-- 标签由 JS 自动生成，也可以手动写 -->
-    </div>
+    <div class="tag-filter" id="tagFilter"></div>
   </div>
 
-  <!-- ===================== CARDS ===================== -->
   <div class="grid" id="grid"></div>
 
-  <!-- ===================== FOOTER ===================== -->
   <footer>
-    <!-- ✏️ 改成你的 GitHub 链接 -->
     <span>© 2025 <a href="https://sisyphite.github.io">@sisyphite</a></span>
-    <span>
-      <a href="https://github.com/sisyphite">GitHub ↗</a>
-    </span>
+    <span><a href="https://github.com/sisyphite">GitHub ↗</a></span>
   </footer>
 
 </div>
 
 <script>
-/* ==========================================================
-   DATA — 在这里填充你的脚本信息
-   每个对象代表一个脚本卡片
-   ========================================================== */
 base = window.location.origin + window.location.pathname.replace(/\/[^/]*$/, '/')
 const SCRIPTS = [
   {
-    name: "update-macaddress.ps1",          // 脚本名
-    icon: "✦",                        // 任意 emoji 或字符
-    desc: "通过注册表修改网卡驱动的 MAC 地址", // 简短描述
-    tags: ["powershell", "mac-address"],           // 标签（用于筛选）
+    name: "update-macaddress.ps1",
+    icon: "✦",
+    desc: "通过注册表修改网卡驱动的 MAC 地址",
+    tags: ["powershell", "mac-address"],
     lang: "powershell",
-    // 多个 tab，每个 tab 是一个示例场景
     examples: [
       {
         label: "基本用法",
-        code:
-`irm ${base}update-macaddress.ps1 | iex`
+        code: `irm ${base}update-macaddress.ps1 | iex`
       }
     ],
-    // 参数说明表（可选，留空则不显示）
-    params: [
-    ]
+    params: []
   },
   {
-    name: "activate-windows.win",          // 脚本名
-    icon: "✦",                        // 任意 emoji 或字符
-    desc: "激活Windows及Office.此脚本Fork自国外大神，感谢", // 简短描述", // 简短描述
-    tags: ["powershell", "Windows", "Office"],           // 标签（用于筛选）
+    name: "activate-windows.win",
+    icon: "✦",
+    desc: "激活Windows及Office.此脚本Fork自国外大神，感谢",
+    tags: ["powershell", "Windows", "Office"],
     lang: "powershell",
-    // 多个 tab，每个 tab 是一个示例场景
     examples: [
       {
         label: "基本用法",
-        code:
-`irm ${base}activate-windows.win | iex`
+        code: `irm ${base}activate-windows.win | iex`
       }
     ],
-    // 参数说明表（可选，留空则不显示）
-    params: [
-    ]
+    params: []
   }
 ];
 
-/* ==========================================================
-   ENGINE — 不需要改动
-   ========================================================== */
-const grid     = document.getElementById('grid');
-const searchEl = document.getElementById('search');
+/* ── ENGINE ─────────────────────────────────────────────── */
+const grid      = document.getElementById('grid');
+const searchEl  = document.getElementById('search');
 const tagFilter = document.getElementById('tagFilter');
 
-// Collect all unique tags
 const allTags = [...new Set(SCRIPTS.flatMap(s => s.tags))].sort();
 let activeTag = null;
 
-// Render tag buttons
 const allBtn = makeTagBtn('全部', null);
 allBtn.classList.add('active');
 tagFilter.appendChild(allBtn);
@@ -486,10 +457,7 @@ function render() {
     grid.innerHTML = `<div class="empty"><div class="empty-icon">⌀</div>没找到匹配的脚本</div>`;
     return;
   }
-  filtered.forEach((s, i) => {
-    grid.appendChild(buildCard(s, i));
-  });
-  // syntax highlight all code blocks
+  filtered.forEach((s, i) => grid.appendChild(buildCard(s, i)));
   document.querySelectorAll('pre code').forEach(el => {
     if (window.hljs) hljs.highlightElement(el);
   });
@@ -500,10 +468,9 @@ function buildCard(s, i) {
   card.className = 'card';
   card.style.animationDelay = `${i * 0.05}s`;
 
-  // Tags html
   const tagsHtml = s.tags.map(t => `<span class="chip">${t}</span>`).join('');
 
-  // Params table
+  // Params section
   let paramsHtml = '';
   if (s.params && s.params.length) {
     const rows = s.params.map(([flag, desc]) =>
@@ -511,28 +478,36 @@ function buildCard(s, i) {
     ).join('');
     paramsHtml = `
       <div class="code-section">
-        <div class="code-tabs"><div class="code-tab active">参数</div></div>
+        <div class="code-tabs">
+          <div class="code-tabs-left">
+            <div class="code-tab active">参数</div>
+          </div>
+        </div>
         <div class="code-block active">
           <table class="params-table"><tbody>${rows}</tbody></table>
         </div>
       </div>`;
   }
 
-  // Examples tabs
+  // Examples section — copy button is in the tab bar, not overlapping code
   let exHtml = '';
   if (s.examples && s.examples.length) {
     const tabBtns = s.examples.map((e, idx) =>
       `<div class="code-tab${idx===0?' active':''}" data-idx="${idx}">${e.label}</div>`
     ).join('');
+
     const blocks = s.examples.map((e, idx) =>
       `<div class="code-block${idx===0?' active':''}" data-idx="${idx}">
-        <button class="copy-btn">copy</button>
         <pre><code class="language-${s.lang || 'bash'}">${escHtml(e.code)}</code></pre>
       </div>`
     ).join('');
+
     exHtml = `
       <div class="code-section">
-        <div class="code-tabs ex-tabs">${tabBtns}</div>
+        <div class="code-tabs ex-tabs">
+          <div class="code-tabs-left">${tabBtns}</div>
+          <button class="copy-btn">copy</button>
+        </div>
         ${blocks}
       </div>`;
   }
@@ -561,13 +536,18 @@ function buildCard(s, i) {
     });
   });
 
-  // Copy buttons
+  // Copy button — reads whichever code block is currently active
   card.querySelectorAll('.copy-btn').forEach(btn => {
     btn.addEventListener('click', () => {
-      const pre = btn.nextElementSibling;
-      navigator.clipboard.writeText(pre.textContent.trim()).then(() => {
+      const activeBlock = btn.closest('.code-section').querySelector('.code-block.active pre');
+      if (!activeBlock) return;
+      navigator.clipboard.writeText(activeBlock.textContent.trim()).then(() => {
         btn.textContent = 'copied!';
-        setTimeout(() => btn.textContent = 'copy', 1500);
+        btn.classList.add('copied');
+        setTimeout(() => {
+          btn.textContent = 'copy';
+          btn.classList.remove('copied');
+        }, 1500);
       });
     });
   });
@@ -583,8 +563,6 @@ searchEl.addEventListener('input', render);
 </script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/powershell.min.js"></script>
-<script>
-  render();
-</script>
+<script>render();</script>
 </body>
 </html>
