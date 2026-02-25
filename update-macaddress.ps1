@@ -33,7 +33,7 @@ if (-not (Test-Admin)) {
             if ([string]::IsNullOrWhiteSpace($src) -or $src.Length -lt 500) {
                 throw "下载内容过短或为空（$($src.Length) 字符），可能获取到了错误的页面。"
             }
-            Set-Content -Path $tmpFile -Value $src -Encoding UTF8 -Force
+            [System.IO.File]::WriteAllText($tmpFile, $src, [System.Text.Encoding]::UTF8)
             $scriptPath = $tmpFile
         }
         catch {
@@ -47,7 +47,7 @@ if (-not (Test-Admin)) {
     try {
         # 追加自删逻辑，让子进程执行完后自己清理临时文件，避免 -Wait + RunAs 兼容性问题
         if ($tmpFile) {
-            Add-Content -Path $tmpFile -Value "`nRemove-Item -LiteralPath '$tmpFile' -Force -ErrorAction SilentlyContinue" -Encoding UTF8
+            [System.IO.File]::AppendAllText($tmpFile, "`nRemove-Item -LiteralPath '$tmpFile' -Force -ErrorAction SilentlyContinue", [System.Text.Encoding]::UTF8)
         }
 
         Start-Process -FilePath "powershell.exe" `
