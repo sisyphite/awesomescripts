@@ -1,59 +1,188 @@
 # -----------------------------------------------
-# MAC 地址修改工具
+# MAC 地址修改工具 (加固版)
 # 功能：自动请求管理员权限、修改指定网卡 MAC 地址
 # -----------------------------------------------
 
-#region ── 自动提权 ────────────────────────────────────────────────────────────
-$isAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole(
-    [Security.Principal.WindowsBuiltInRole]::Administrator
-)
+#region ── 常量 ──────────────────────────────────────────────────────────────
+$SCRIPT_URL    = "https://sisyphite.github.io/awesomescripts/update-macaddress.ps1"
+$REG_BASE      = "HKLM:\SYSTEM\CurrentControlSet\Control\Class\{4d36e972-e325-11ce-bfc1-08002be10318}"
+$LINE          = "---------------"
+$MAC_MAX       = 0xFFFFFFFFFFFFL   # 用 L 后缀强制 [long]，避免溢出到负数
+$ADAPTER_TIMEOUT_MS = 15000
+#endregion
 
-if (-not $isAdmin) {
+#region ── 自动提权 ───────────────────────────────────────────────────────────
+function Test-Admin {
+    ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole(
+        [Security.Principal.WindowsBuiltInRole]::Administrator
+    )
+}
+
+if (-not (Test-Admin)) {
     Write-Host "权限不足，正在以管理员身份重新启动脚本..."
 
     $scriptPath = $MyInvocation.MyCommand.Definition
+    $tmpFile    = $null
 
-    # 通过管道（irm | iex）执行时，Definition 返回的是宿主 exe 路径而非 .ps1 文件
-    # 用扩展名判断是否真的有落盘脚本
+    # irm | iex 管道执行时，Definition 是宿主 exe 路径，需要落盘后再提权
     if ($scriptPath -notlike "*.ps1") {
-        $tmpFile = Join-Path $env:TEMP "update_mac_$(Get-Random).ps1"
+        $tmpFile = Join-Path $env:TEMP ("update_mac_{0}.ps1" -f [System.IO.Path]::GetRandomFileName())
         try {
-            # 从远端重新下载脚本内容写入临时文件
-            $src = (Invoke-RestMethod -Uri "https://sisyphite.github.io/awesomescripts/update-macaddress.ps1" -ErrorAction Stop)
+            $src = Invoke-RestMethod -Uri $SCRIPT_URL -UseBasicParsing -ErrorAction Stop
+            # 验证下载内容是否像一个 PowerShell 脚本（防止下载到错误页面）
+            if ($src -notmatch '#.*MAC') {
+                throw "下载内容校验失败，可能获取到了错误的页面。"
+            }
             Set-Content -Path $tmpFile -Value $src -Encoding UTF8 -Force
             $scriptPath = $tmpFile
         }
         catch {
-            Write-Host "错误：无法获取脚本内容以提权重启。请手动以管理员身份运行此脚本。"
+            Write-Host "错误：无法获取脚本内容以提权重启。`n  $_"
+            Write-Host "请手动以管理员身份运行此脚本。"
             Read-Host "按下 ENTER 退出..."
-            exit
+            exit 1
         }
     }
 
     try {
-        Start-Process -FilePath "powershell.exe" `
+        # -Wait 确保临时文件在子进程退出前不会被删除
+        $proc = Start-Process -FilePath "powershell.exe" `
             -ArgumentList "-NoProfile -ExecutionPolicy Bypass -File `"$scriptPath`"" `
             -Verb RunAs `
+            -Wait `
+            -PassThru `
             -ErrorAction Stop
+        # 透传子进程退出码
+        $exitCode = if ($proc) { $proc.ExitCode } else { 0 }
     }
     catch {
-        Write-Host "错误：无法获取管理员权限。请手动以管理员身份运行此脚本。"
-        Read-Host "按下 ENTER 退出..."
+        Write-Host "错误：无法获取管理员权限。`n  $_"
+        Write-Host "请手动以管理员身份运行此脚本。"
+        $exitCode = 1
     }
-    exit
+    finally {
+        # 子进程已退出，现在可以安全删除临时文件
+        if ($tmpFile -and (Test-Path $tmpFile)) {
+            Remove-Item $tmpFile -Force -ErrorAction SilentlyContinue
+        }
+    }
+
+    exit $exitCode
 }
 #endregion
 
-$line_delimiter = "---------------"
-
 #region ── 辅助函数 ───────────────────────────────────────────────────────────
+
+# 从注册表或 PermanentAddress 获取 12 位十六进制基准 MAC
+function Get-BaseMAC {
+    param(
+        [string]$RegPath,
+        [string]$NetCfgInstanceId
+    )
+
+    $current = (Get-ItemProperty $RegPath -ErrorAction SilentlyContinue).NetworkAddress
+
+    # 注册表值存在且合法则直接用
+    if (-not [string]::IsNullOrWhiteSpace($current)) {
+        $clean = $current -replace '[-:]', ''
+        if ($clean -match '^[0-9A-Fa-f]{12}$') {
+            return $clean.ToUpper()
+        }
+    }
+
+    Write-Host "注册表 NetworkAddress 不存在或无效，正在读取硬件原始 MAC..."
+
+    $hwAdapter = Get-NetAdapter -ErrorAction SilentlyContinue |
+                 Where-Object { $_.InterfaceGuid -eq $NetCfgInstanceId } |
+                 Select-Object -First 1
+
+    if ($null -eq $hwAdapter) {
+        Write-Host "错误：无法通过 InterfaceGuid 找到对应网卡。"
+        return $null
+    }
+
+    $perm = $hwAdapter.PermanentAddress -replace '[-:]', ''
+
+    if ($perm -notmatch '^[0-9A-Fa-f]{12}$') {
+        Write-Host "错误：PermanentAddress 格式异常: '$($hwAdapter.PermanentAddress)'"
+        return $null
+    }
+
+    # 全零地址视为无效（某些驱动占位符）
+    if ($perm -eq '000000000000') {
+        Write-Host "错误：PermanentAddress 全零，驱动可能不支持读取物理地址。"
+        return $null
+    }
+
+    return $perm.ToUpper()
+}
+
+# 等待网卡达到目标状态，超时返回 $false
+function Wait-AdapterStatus {
+    param(
+        [string]$Name,
+        [string]$TargetStatus,   # 'Disabled' 或非 'Disabled'
+        [int]   $TimeoutMs = $ADAPTER_TIMEOUT_MS
+    )
+
+    $elapsed  = 0
+    $interval = 300
+
+    while ($elapsed -lt $TimeoutMs) {
+        Start-Sleep -Milliseconds $interval
+        $elapsed += $interval
+        $status = (Get-NetAdapter -Name $Name -ErrorAction SilentlyContinue).Status
+
+        $reached = if ($TargetStatus -eq 'Disabled') {
+            $status -eq 'Disabled'
+        } else {
+            $status -ne 'Disabled' -and -not [string]::IsNullOrEmpty($status)
+        }
+
+        if ($reached) { return $true }
+    }
+    return $false
+}
+
+function Restart-NetworkAdapter {
+    param([string]$AdapterName)
+
+    Write-Host "正在重启网卡: $AdapterName ..."
+
+    try {
+        Disable-NetAdapter -Name $AdapterName -Confirm:$false -ErrorAction Stop
+    }
+    catch {
+        throw "禁用网卡失败: $_"
+    }
+
+    if (-not (Wait-AdapterStatus -Name $AdapterName -TargetStatus 'Disabled')) {
+        Write-Host "警告：等待网卡禁用超时，继续尝试启用..."
+    }
+
+    try {
+        Enable-NetAdapter -Name $AdapterName -Confirm:$false -ErrorAction Stop
+    }
+    catch {
+        throw "启用网卡失败: $_"
+    }
+
+    if (-not (Wait-AdapterStatus -Name $AdapterName -TargetStatus 'Up')) {
+        Write-Host "警告：等待网卡启用超时，请手动确认网卡状态。"
+    }
+    else {
+        Write-Host "网卡已恢复正常。"
+    }
+}
+
+# 显示已枚举适配器并让用户选择
 function Select-Adapter {
     param([array]$Adapters)
 
     while ($true) {
         $choice = (Read-Host "`n请输入要选择的适配器序号").Trim()
 
-        if ($choice -eq "") { continue }
+        if ([string]::IsNullOrEmpty($choice)) { continue }
 
         if ($choice -notmatch '^\d+$') {
             Write-Host "输入不合法，请输入整数！"
@@ -67,147 +196,110 @@ function Select-Adapter {
             continue
         }
 
-        $desc = (Get-ItemProperty $Adapters[$idx].PSPath).DriverDesc
+        $desc = (Get-ItemProperty $Adapters[$idx].PSPath -ErrorAction SilentlyContinue).DriverDesc
         Write-Host "已选中适配器："
-        Write-Host $line_delimiter
-        Write-Host "$idx`: $desc"
-        Write-Host $line_delimiter
+        Write-Host $LINE
+        Write-Host "${idx}: $desc"
+        Write-Host $LINE
         return $idx
     }
 }
 
-function Get-BaseMAC {
-    param($RegPath, $NetCfgInstanceId)
-
-    $current = (Get-ItemProperty $RegPath).NetworkAddress
-
-    if ([string]::IsNullOrWhiteSpace($current) -or $current -notmatch '^[0-9A-Fa-f]{12}$') {
-        Write-Host "注册表 NetworkAddress 不存在或无效，正在获取硬件原始 MAC..."
-        $hwAdapter = Get-NetAdapter | Where-Object { $_.InterfaceGuid -eq $NetCfgInstanceId }
-
-        if ($null -eq $hwAdapter) {
-            return $null
-        }
-
-        # PermanentAddress 格式可能是 "XX-XX-..." 或 "XXXXXXXXXXXX"，统一去掉分隔符
-        $current = $hwAdapter.PermanentAddress -replace '[-:]', ''
+# 验证 MAC 字节1 的合法性（单播 + 全球管理地址）
+function Test-MACValid {
+    param([long]$MacInt)
+    # 取最高字节（字节 0）：低位第1位=组播位，低位第2位=本地管理位
+    # 新 MAC 应为单播（bit0=0）；本地管理（bit1=1）是可接受的
+    $byte0 = ($MacInt -shr 40) -band 0xFF
+    if ($byte0 -band 0x01) {
+        Write-Host "警告：生成的 MAC 地址第一个字节为奇数（组播地址），已自动将组播位清零。"
+        return $MacInt -band (-bnot (0x01L -shl 40))
     }
-
-    if ($current -notmatch '^[0-9A-Fa-f]{12}$') {
-        return $null
-    }
-
-    return $current.ToUpper()
-}
-
-function Restart-NetworkAdapter {
-    param([string]$AdapterName)
-
-    Write-Host "正在重启网卡: $AdapterName ..."
-
-    Disable-NetAdapter -Name $AdapterName -Confirm:$false -ErrorAction Stop
-
-    $timeout = 10000   # ms
-    $elapsed = 0
-    do {
-        Start-Sleep -Milliseconds 300
-        $elapsed += 300
-        $status = (Get-NetAdapter -Name $AdapterName -ErrorAction SilentlyContinue).Status
-    } until ($status -eq 'Disabled' -or $elapsed -ge $timeout)
-
-    if ($elapsed -ge $timeout) {
-        Write-Host "警告：等待网卡禁用超时，继续尝试启用..."
-    }
-
-    Enable-NetAdapter -Name $AdapterName -Confirm:$false -ErrorAction Stop
-
-    $elapsed = 0
-    do {
-        Start-Sleep -Milliseconds 300
-        $elapsed += 300
-        $status = (Get-NetAdapter -Name $AdapterName -ErrorAction SilentlyContinue).Status
-    } until ($status -ne 'Disabled' -or $elapsed -ge $timeout)
-
-    if ($elapsed -ge $timeout) {
-        Write-Host "警告：等待网卡启用超时，请手动确认网卡状态。"
-    }
-    else {
-        Write-Host "网卡已恢复正常。"
-    }
+    return $MacInt
 }
 #endregion
 
 #region ── 枚举适配器 ─────────────────────────────────────────────────────────
-$regBase = "HKLM:\SYSTEM\CurrentControlSet\Control\Class\{4d36e972-e325-11ce-bfc1-08002be10318}"
-
-$adapters = Get-ChildItem $regBase -ErrorAction SilentlyContinue | Where-Object {
+$adapters = Get-ChildItem $REG_BASE -ErrorAction SilentlyContinue | Where-Object {
     $devId = (Get-ItemProperty $_.PSPath -ErrorAction SilentlyContinue).DeviceInstanceID
     $devId -match '^(PCI\\VEN_|USB\\VID_)'
 }
 
 if (-not $adapters -or $adapters.Count -eq 0) {
-    Write-Host "未找到有效的网络适配器注册表项。"
+    Write-Host "错误：未找到有效的网络适配器注册表项（PCI/USB）。"
     Read-Host "按下 ENTER 退出..."
-    exit
+    exit 1
 }
 
 Write-Host "找到以下网络适配器："
-Write-Host $line_delimiter
+Write-Host $LINE
 for ($i = 0; $i -lt $adapters.Count; $i++) {
     $desc = (Get-ItemProperty $adapters[$i].PSPath -ErrorAction SilentlyContinue).DriverDesc
-    Write-Host "$i`: $desc"
+    Write-Host "${i}: $desc"
 }
-Write-Host $line_delimiter
+Write-Host $LINE
 #endregion
 
 #region ── 主流程 ─────────────────────────────────────────────────────────────
 $idx  = Select-Adapter $adapters
 $path = $adapters[$idx].PSPath
-$id   = (Get-ItemProperty $path).NetCfgInstanceId
+$id   = (Get-ItemProperty $path -ErrorAction SilentlyContinue).NetCfgInstanceId
+
+if ([string]::IsNullOrWhiteSpace($id)) {
+    Write-Host "错误：无法读取 NetCfgInstanceId，注册表项可能已损坏。"
+    Read-Host "按下 ENTER 退出..."
+    exit 1
+}
 
 $current = Get-BaseMAC -RegPath $path -NetCfgInstanceId $id
 
 if ([string]::IsNullOrWhiteSpace($current)) {
-    Write-Host "错误：无法获取该网卡的物理 MAC 地址。"
+    Write-Host "错误：无法获取该网卡的物理 MAC 地址，终止操作。"
     Read-Host "按下 ENTER 退出..."
-    exit
+    exit 1
 }
 
 Write-Host "基准 MAC 地址: $current"
 Write-Host "输入 + 或 - 来修改 MAC 地址（偏移量 ±1）"
 
-$macInt = [Convert]::ToInt64($current, 16)
+# 用 [long] 确保全程有符号 64 位运算，不会静默截断
+[long]$macInt = [Convert]::ToInt64($current, 16)
 
 while ($true) {
     $choice = (Read-Host).Trim()
-    if ($choice -eq "+") { $macInt++; break }
-    elseif ($choice -eq "-") { $macInt--; break }
-    else { Write-Host "输入无效，请输入 + 或 - ！" }
+    if     ($choice -eq '+') { $macInt++; break }
+    elseif ($choice -eq '-') { $macInt--; break }
+    else   { Write-Host "输入无效，请输入 + 或 -！" }
 }
 
-# 防止 MAC 地址溢出（合法范围 0x000000000000 ~ 0xFFFFFFFFFFFF）
-$macInt = [Math]::Max(0L, [Math]::Min($macInt, 0xFFFFFFFFFFFFL))
+# 防溢出夹紧
+$macInt = [Math]::Max(0L, [Math]::Min($macInt, $MAC_MAX))
+
+# 检查并修正组播位
+$macInt = Test-MACValid -MacInt $macInt
 
 # 格式化为 12 位大写十六进制
-$newMac = "{0:X12}" -f $macInt
+$newMac = '{0:X12}' -f $macInt
 Write-Host "新 MAC 地址: $newMac"
 
 # 写入注册表
 try {
-    Set-ItemProperty -Path $path -Name "NetworkAddress" -Value $newMac -Force -ErrorAction Stop
+    Set-ItemProperty -Path $path -Name "NetworkAddress" -Value $newMac -Type String -Force -ErrorAction Stop
     Write-Host "成功写入注册表: $newMac"
 }
 catch {
-    Write-Host "写入失败: $_"
+    Write-Host "写入注册表失败: $_"
     Read-Host "按下 ENTER 退出..."
-    exit
+    exit 1
 }
 
 # 重启网卡
-$adapter = Get-NetAdapter | Where-Object { $_.InterfaceGuid -eq $id } | Select-Object -First 1
+$adapter = Get-NetAdapter -ErrorAction SilentlyContinue |
+           Where-Object { $_.InterfaceGuid -eq $id } |
+           Select-Object -First 1
 
 if ($null -eq $adapter) {
-    Write-Host "警告：找不到对应网卡，请手动重启网卡以应用更改。"
+    Write-Host "警告：找不到对应网卡（InterfaceGuid: $id），请手动重启网卡以应用更改。"
 }
 else {
     try {
@@ -221,4 +313,5 @@ else {
 
 Write-Host "操作完成。"
 Read-Host "按下 ENTER 退出..."
+exit 0
 #endregion
