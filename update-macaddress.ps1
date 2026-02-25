@@ -30,8 +30,8 @@ if (-not (Test-Admin)) {
         try {
             $src = Invoke-RestMethod -Uri $SCRIPT_URL -UseBasicParsing -ErrorAction Stop
             # 验证下载内容是否像一个 PowerShell 脚本（防止下载到错误页面）
-            if ($src -notmatch '#.*MAC') {
-                throw "下载内容校验失败，可能获取到了错误的页面。"
+            if ([string]::IsNullOrWhiteSpace($src) -or $src.Length -lt 500) {
+                throw "下载内容过短或为空（$($src.Length) 字符），可能获取到了错误的页面。"
             }
             Set-Content -Path $tmpFile -Value $src -Encoding UTF8 -Force
             $scriptPath = $tmpFile
@@ -45,29 +45,27 @@ if (-not (Test-Admin)) {
     }
 
     try {
-        # -Wait 确保临时文件在子进程退出前不会被删除
-        $proc = Start-Process -FilePath "powershell.exe" `
+        # 追加自删逻辑，让子进程执行完后自己清理临时文件，避免 -Wait + RunAs 兼容性问题
+        if ($tmpFile) {
+            Add-Content -Path $tmpFile -Value "`nRemove-Item -LiteralPath '$tmpFile' -Force -ErrorAction SilentlyContinue" -Encoding UTF8
+        }
+
+        Start-Process -FilePath "powershell.exe" `
             -ArgumentList "-NoProfile -ExecutionPolicy Bypass -File `"$scriptPath`"" `
             -Verb RunAs `
-            -Wait `
-            -PassThru `
             -ErrorAction Stop
-        # 透传子进程退出码
-        $exitCode = if ($proc) { $proc.ExitCode } else { 0 }
     }
     catch {
         Write-Host "错误：无法获取管理员权限。`n  $_"
         Write-Host "请手动以管理员身份运行此脚本。"
-        $exitCode = 1
-    }
-    finally {
-        # 子进程已退出，现在可以安全删除临时文件
+        # 提权失败时由父进程清理
         if ($tmpFile -and (Test-Path $tmpFile)) {
             Remove-Item $tmpFile -Force -ErrorAction SilentlyContinue
         }
+        exit 1
     }
 
-    exit $exitCode
+    exit 0
 }
 #endregion
 
