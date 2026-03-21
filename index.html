@@ -10,9 +10,6 @@
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/tokyo-night-dark.min.css" />
 
   <style>
-    /* ============================================
-       DESIGN TOKENS — edit freely
-       ============================================ */
     :root {
       --bg:        #0d0f13;
       --surface:   #13161c;
@@ -54,9 +51,6 @@
       padding: 60px 24px 100px;
     }
 
-    /* ============================================
-       HEADER
-       ============================================ */
     header { margin-bottom: 64px; }
 
     .header-badge {
@@ -99,9 +93,6 @@
       font-size: 13px;
     }
 
-    /* ============================================
-       SEARCH / FILTER BAR
-       ============================================ */
     .toolbar {
       display: flex;
       gap: 10px;
@@ -151,9 +142,6 @@
       background: rgba(79,255,176,.06);
     }
 
-    /* ============================================
-       SCRIPT CARDS GRID
-       ============================================ */
     .grid {
       display: grid;
       grid-template-columns: repeat(auto-fill, minmax(380px, 1fr));
@@ -164,7 +152,8 @@
       background: var(--surface);
       border: 1px solid var(--border);
       border-radius: var(--radius);
-      overflow: hidden;
+      /* 去掉 overflow:hidden，避免裁切代码块内容 */
+      overflow: visible;
       transition: border-color .2s, transform .15s;
       cursor: default;
     }
@@ -224,14 +213,13 @@
       border: 1px solid rgba(79,255,176,.15);
     }
 
-    /* ============================================
-       CODE SECTION — redesigned
-       ============================================ */
     .code-section {
       border-top: 1px solid var(--border);
+      /* 让圆角跟随卡片底部 */
+      border-radius: 0 0 var(--radius) var(--radius);
+      overflow: hidden;
     }
 
-    /* Tab bar: label on left, copy button on right — same row */
     .code-tabs {
       display: flex;
       align-items: center;
@@ -261,7 +249,6 @@
       background: rgba(79,255,176,.04);
     }
 
-    /* Copy button lives in the tab bar, right side */
     .copy-btn {
       background: transparent;
       border: 1px solid var(--border);
@@ -292,14 +279,43 @@
     .code-block.active { display: block; }
 
     pre {
-      padding: 20px 24px;
+      padding: 16px 20px;
+      /* 关键修复：
+         1. overflow-x: auto 让内容可以横向滚动
+         2. padding-bottom 足够大，滚动条出现时不压住最后一行
+         3. 使用 overlay 滚动条（Chrome/Safari支持），悬浮不占空间
+      */
       overflow-x: auto;
+      overflow-y: visible;
+      /* 为滚动条预留底部空间，兼容所有浏览器 */
+      padding-bottom: 20px;
+      /* 自定义滚动条，细而不遮内容 */
+      scrollbar-width: thin;
+      scrollbar-color: var(--border) transparent;
       font-size: 12.5px;
       line-height: 1.8;
       color: #a8c0d6;
+      /* 防止内容被卡片边界裁切 */
+      min-height: 0;
+      word-break: normal;
+      white-space: pre;
     }
 
-    /* Options / Params table */
+    /* Webkit 滚动条样式：细、半透明、悬浮不占高度 */
+    pre::-webkit-scrollbar {
+      height: 4px;
+    }
+    pre::-webkit-scrollbar-track {
+      background: transparent;
+    }
+    pre::-webkit-scrollbar-thumb {
+      background: var(--border);
+      border-radius: 2px;
+    }
+    pre::-webkit-scrollbar-thumb:hover {
+      background: var(--muted);
+    }
+
     .params-table {
       width: 100%;
       border-collapse: collapse;
@@ -318,9 +334,6 @@
       min-width: 120px;
     }
 
-    /* ============================================
-       FOOTER
-       ============================================ */
     footer {
       margin-top: 80px;
       padding-top: 24px;
@@ -335,11 +348,9 @@
     footer a { color: var(--muted); text-decoration: none; }
     footer a:hover { color: var(--accent); }
 
-    /* highlight.js overrides */
     .hljs { background: transparent !important; padding: 0 !important; }
     pre code.hljs { display: block; }
 
-    /* Empty state */
     .empty {
       grid-column: 1/-1;
       text-align: center;
@@ -348,7 +359,6 @@
     }
     .empty-icon { font-size: 40px; margin-bottom: 12px; }
 
-    /* Animations */
     .card { animation: fadeUp .3s ease both; }
     @keyframes fadeUp {
       from { opacity: 0; transform: translateY(12px); }
@@ -418,7 +428,6 @@ const SCRIPTS = [
   }
 ];
 
-/* ── ENGINE ─────────────────────────────────────────────── */
 const grid      = document.getElementById('grid');
 const searchEl  = document.getElementById('search');
 const tagFilter = document.getElementById('tagFilter');
@@ -470,7 +479,6 @@ function buildCard(s, i) {
 
   const tagsHtml = s.tags.map(t => `<span class="chip">${t}</span>`).join('');
 
-  // Params section
   let paramsHtml = '';
   if (s.params && s.params.length) {
     const rows = s.params.map(([flag, desc]) =>
@@ -489,7 +497,6 @@ function buildCard(s, i) {
       </div>`;
   }
 
-  // Examples section — copy button is in the tab bar, not overlapping code
   let exHtml = '';
   if (s.examples && s.examples.length) {
     const tabBtns = s.examples.map((e, idx) =>
@@ -525,7 +532,6 @@ function buildCard(s, i) {
     ${exHtml}
   `;
 
-  // Tab switching
   card.querySelectorAll('.ex-tabs .code-tab').forEach(tab => {
     tab.addEventListener('click', () => {
       const idx = tab.dataset.idx;
@@ -536,7 +542,6 @@ function buildCard(s, i) {
     });
   });
 
-  // Copy button — reads whichever code block is currently active
   card.querySelectorAll('.copy-btn').forEach(btn => {
     btn.addEventListener('click', () => {
       const activeBlock = btn.closest('.code-section').querySelector('.code-block.active pre');
